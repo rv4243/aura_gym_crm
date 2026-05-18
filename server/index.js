@@ -37,7 +37,8 @@ app.use(cors({
 app.use(express.json());
 
 // ── Static files: uploaded member photos ──────────────────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const UPLOADS_STATIC = process.env.VERCEL ? '/tmp/uploads' : path.join(__dirname, 'uploads');
+app.use('/uploads', express.static(UPLOADS_STATIC));
 
 // ── Health check (public) ────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date() }));

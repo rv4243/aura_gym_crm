@@ -6,7 +6,11 @@ import { fileURLToPath } from 'url';
 import Member from '../models/Member.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+
+// Vercel's filesystem is read-only — only /tmp is writable
+const UPLOAD_DIR = process.env.VERCEL
+    ? '/tmp/uploads'
+    : path.join(__dirname, '..', 'uploads');
 
 // Ensure uploads directory exists
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
