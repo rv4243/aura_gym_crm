@@ -8,6 +8,7 @@ import Modal from '../components/Modal.jsx';
 import Loader from '../components/Loader.jsx';
 
 const EMPTY = { memberId: '', planId: '', amount: '', method: 'cash', status: 'paid', notes: '' };
+const RENEW_EMPTY = { memberId: '', planId: '', amount: '', method: 'cash', status: 'paid', notes: '' };
 
 const STATUS_OPTIONS = ['paid', 'pending', 'overdue'];
 const STATUS_META = {
@@ -54,7 +55,6 @@ function StatusCell({ payment, onUpdate }) {
     );
   }
 
-  // Expanded pill buttons
   return (
     <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'nowrap' }}>
       {STATUS_OPTIONS.map(s => {
@@ -100,6 +100,13 @@ export default function Payments() {
   const [toast,    setToast]    = useState(null);
   const [filters,  setFilters]  = useState({ status: '', month: '', year: '' });
 
+  // ── Renewal state ──────────────────────────────────────────────────────────
+  const [renewModal,   setRenewModal]   = useState(false);
+  const [renewForm,    setRenewForm]    = useState(RENEW_EMPTY);
+  const [renewMember,  setRenewMember]  = useState(null);  // full member object for display
+  const [renewSaving,  setRenewSaving]  = useState(false);
+  const [planChanged,  setPlanChanged]  = useState(false); // whether user picked a different plan
+
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   const load = useCallback(() => {
@@ -122,7 +129,6 @@ export default function Payments() {
   const handleStatusUpdate = async (paymentId, newStatus) => {
     try {
       await updatePayment(paymentId, { status: newStatus });
-      // Optimistic update — no full reload needed
       setPayments(prev =>
         prev.map(p => p._id === paymentId ? { ...p, status: newStatus } : p)
       );
@@ -150,10 +156,64 @@ export default function Payments() {
     setSaving(false);
   };
 
+  // ── Renewal ────────────────────────────────────────────────────────────────
+  const openRenewModal = (payment) => {
+    // Find the full member record to show expiry info
+    const member = members.find(m => m._id === payment.memberId?._id);
+    setRenewMember(member || payment.memberId);
+
+    const currentPlanId = payment.planId?._id || '';
+    const currentPlan   = plans.find(p => p._id === currentPlanId);
+
+    setRenewForm({
+      memberId: payment.memberId?._id || '',
+      planId:   currentPlanId,
+      amount:   currentPlan ? currentPlan.price : '',
+      method:   'cash',
+      status:   'paid',
+      notes:    '',
+    });
+    setPlanChanged(false);
+    setRenewModal(true);
+  };
+
+  const handleRenewPlanChange = (planId) => {
+    const originalPlanId = renewMember?.planId?._id || renewMember?.planId || '';
+    const plan = plans.find(p => p._id === planId);
+    setPlanChanged(planId !== originalPlanId);
+    setRenewForm(f => ({ ...f, planId, amount: plan ? plan.price : '' }));
+  };
+
+  const handleRenewSave = async () => {
+    setRenewSaving(true);
+    try {
+      const autoNote = planChanged ? 'Plan upgraded/changed during renewal' : 'Membership renewed';
+      const notes    = renewForm.notes ? `${autoNote} — ${renewForm.notes}` : autoNote;
+      await createPayment({ ...renewForm, amount: Number(renewForm.amount), notes });
+      showToast('Membership renewed successfully 🎉');
+      setRenewModal(false);
+      setRenewForm(RENEW_EMPTY);
+      setRenewMember(null);
+      load();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Renewal failed', 'error');
+    }
+    setRenewSaving(false);
+  };
+
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  const isExpired = (d) => d && new Date(d) < new Date();
 
   const now = new Date();
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Compute new expiry preview for renewal modal
+  const renewSelectedPlan = plans.find(p => p._id === renewForm.planId);
+  const renewCurrentExpiry = renewMember?.expiryDate ? new Date(renewMember.expiryDate) : null;
+  const renewBase = renewCurrentExpiry && renewCurrentExpiry > now ? renewCurrentExpiry : now;
+  const renewNewExpiry = renewSelectedPlan
+    ? (() => { const d = new Date(renewBase); d.setDate(d.getDate() + renewSelectedPlan.durationDays); return d; })()
+    : null;
 
   return (
     <>
@@ -166,8 +226,6 @@ export default function Payments() {
           </div>
           <button className="btn btn-primary" onClick={() => { setForm(EMPTY); setModal(true); }}>+ Record Payment</button>
         </div>
-
-
 
         {/* Filters */}
         <div className="filter-bar">
@@ -200,11 +258,12 @@ export default function Payments() {
                     <th>Status</th>
                     <th>Date</th>
                     <th>Notes</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {payments.length === 0 ? (
-                    <tr><td colSpan="7">
+                    <tr><td colSpan="8">
                       <div className="empty-state"><h3>No payments yet</h3><p>Record your first payment above.</p></div>
                     </td></tr>
                   ) : payments.map(p => (
@@ -213,13 +272,28 @@ export default function Payments() {
                       <td className="muted">{p.planId?.name || '—'}</td>
                       <td style={{ fontWeight: 600, color: 'var(--accent)' }}>₹{p.amount.toLocaleString('en-IN')}</td>
                       <td><Badge status={p.method} /></td>
-                      {/* ── Inline status updater ── */}
                       <td>
                         <StatusCell payment={p} onUpdate={handleStatusUpdate} />
                       </td>
                       <td className="muted">{fmtDate(p.paidDate)}</td>
                       <td className="muted" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {p.notes || '—'}
+                      </td>
+                      <td>
+                        {/* ── Renew Button ── */}
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title="Renew membership for this member"
+                          onClick={() => openRenewModal(p)}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            fontSize: 11, padding: '4px 10px',
+                            color: 'var(--accent)', borderColor: 'rgba(200,169,110,0.35)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          🔄 Renew
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -229,7 +303,7 @@ export default function Payments() {
           </div>
         )}
 
-        {/* Record Payment Modal */}
+        {/* ── Record Payment Modal ─────────────────────────────────────────── */}
         {modal && (
           <Modal title="Record Payment" onClose={() => setModal(false)}
             footer={<>
@@ -281,6 +355,169 @@ export default function Payments() {
                 <label className="form-label">Notes</label>
                 <input className="form-input" value={form.notes}
                   onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional…" />
+              </div>
+            </div>
+          </Modal>
+        )}
+
+        {/* ── Renewal Modal ────────────────────────────────────────────────── */}
+        {renewModal && (
+          <Modal
+            title="🔄 Renew Membership"
+            onClose={() => { setRenewModal(false); setRenewMember(null); }}
+            footer={<>
+              <button className="btn btn-ghost" onClick={() => { setRenewModal(false); setRenewMember(null); }}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                onClick={handleRenewSave}
+                disabled={renewSaving || !renewForm.memberId || !renewForm.planId}
+              >
+                {renewSaving ? 'Processing…' : planChanged ? 'Renew & Change Plan' : 'Renew Same Plan'}
+              </button>
+            </>}
+          >
+            {/* Member info banner */}
+            {renewMember && (
+              <div style={{
+                background: 'rgba(200,169,110,0.07)',
+                border: '1px solid rgba(200,169,110,0.2)',
+                borderRadius: 8,
+                padding: '14px 18px',
+                marginBottom: 20,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+              }}>
+                {/* Avatar */}
+                <div style={{
+                  width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
+                  background: renewMember.photo ? '#000' : 'linear-gradient(135deg,#c8a96e,#9a7a45)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 700, color: '#0a0a0f',
+                  border: '2px solid rgba(200,169,110,0.3)',
+                  overflow: 'hidden',
+                }}>
+                  {renewMember.photo
+                    ? <img src={`/uploads/${renewMember.photo}`} alt={renewMember.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : (renewMember.name?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2))
+                  }
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{renewMember.name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    Current plan: <strong style={{ color: 'var(--text-primary)' }}>{renewMember.planId?.name || '—'}</strong>
+                    &nbsp;·&nbsp;
+                    Expires: <strong style={{
+                      color: isExpired(renewMember.expiryDate) ? 'var(--danger)' : 'var(--text-primary)'
+                    }}>
+                      {fmtDate(renewMember.expiryDate)}
+                      {isExpired(renewMember.expiryDate) && ' ⚠️ Expired'}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Plan selector */}
+            <div className="form-group">
+              <label className="form-label">
+                Select Plan *
+                {planChanged && (
+                  <span style={{
+                    marginLeft: 8, fontSize: 10, fontWeight: 700,
+                    color: 'var(--warning)', background: 'var(--warning-dim)',
+                    padding: '2px 8px', borderRadius: 10, letterSpacing: 0.5,
+                  }}>
+                    PLAN CHANGE
+                  </span>
+                )}
+              </label>
+              <select
+                className="form-select"
+                value={renewForm.planId}
+                onChange={e => handleRenewPlanChange(e.target.value)}
+              >
+                <option value="">Select plan…</option>
+                {plans.map(p => (
+                  <option key={p._id} value={p._id}>
+                    {p.name} — ₹{p.price} / {p.durationDays}d
+                    {p._id === (renewMember?.planId?._id || renewMember?.planId) ? ' (current)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* New expiry preview */}
+            {renewNewExpiry && (
+              <div style={{
+                background: 'rgba(80,200,120,0.07)',
+                border: '1px solid rgba(80,200,120,0.2)',
+                borderRadius: 6,
+                padding: '10px 14px',
+                marginBottom: 16,
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}>
+                <span style={{ fontSize: 16 }}>📅</span>
+                <span>
+                  New expiry will be&nbsp;
+                  <strong style={{ color: 'var(--success)' }}>
+                    {fmtDate(renewNewExpiry)}
+                  </strong>
+                  &nbsp;({renewSelectedPlan?.durationDays} days{renewCurrentExpiry && renewCurrentExpiry > now ? ' added from current expiry' : ' from today'})
+                </span>
+              </div>
+            )}
+
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Amount (₹) *</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  value={renewForm.amount}
+                  onChange={e => setRenewForm(f => ({ ...f, amount: e.target.value }))}
+                  placeholder="Auto-filled from plan"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Payment Method *</label>
+                <select
+                  className="form-select"
+                  value={renewForm.method}
+                  onChange={e => setRenewForm(f => ({ ...f, method: e.target.value }))}
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Payment Status</label>
+                <select
+                  className="form-select"
+                  value={renewForm.status}
+                  onChange={e => setRenewForm(f => ({ ...f, status: e.target.value }))}
+                >
+                  <option value="paid">Paid</option>
+                  <option value="pending">Pending</option>
+                  <option value="overdue">Overdue</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Notes</label>
+                <input
+                  className="form-input"
+                  value={renewForm.notes}
+                  onChange={e => setRenewForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Optional notes…"
+                />
               </div>
             </div>
           </Modal>

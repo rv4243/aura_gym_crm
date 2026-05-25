@@ -36,6 +36,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// ── Disable response caching for all API routes ───────────────────────────────
+app.use('/api', (_req, res, next) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    next();
+});
+
 // ── Static files: uploaded member photos ──────────────────────────────────────
 const UPLOADS_STATIC = process.env.VERCEL ? '/tmp/uploads' : path.join(__dirname, 'uploads');
 app.use('/uploads', express.static(UPLOADS_STATIC));

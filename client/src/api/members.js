@@ -1,5 +1,5 @@
 import api from './axios.js';
-export const getMembers  = (params) => api.get('/members', { params });
+export const getMembers  = (params) => api.get('/members', { params: { ...params, _t: Date.now() } });
 export const getMember   = (id)     => api.get(`/members/${id}`);
 export const createMember= (data)   => api.post('/members', data);
 export const updateMember= (id, data) => api.put(`/members/${id}`, data);
