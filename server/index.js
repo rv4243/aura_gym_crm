@@ -14,6 +14,10 @@ import memberPhotoRouter from './routes/MemberPhoto.js';
 import paymentsRouter    from './routes/Payments.js';
 import attendanceRouter  from './routes/Attendance.js';
 import dashboardRouter   from './routes/Dashboard.js';
+import expensesRouter    from './routes/Expenses.js';
+import trainersRouter     from './routes/Trainers.js';
+import trainerPhotoRouter from './routes/TrainerPhoto.js';
+import { syncMemberStatuses } from './utils/statusSync.js';
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 import { requireAuth } from './middleware/Requireauth.js';
@@ -56,6 +60,9 @@ app.use('/api/members',    requireAuth, memberPhotoRouter);
 app.use('/api/payments',   requireAuth, paymentsRouter);
 app.use('/api/attendance', requireAuth, attendanceRouter);
 app.use('/api/dashboard',  requireAuth, dashboardRouter);
+app.use('/api/expenses',   requireAuth, expensesRouter);
+app.use('/api/trainers',   requireAuth, trainersRouter);
+app.use('/api/trainers',   requireAuth, trainerPhotoRouter);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -73,6 +80,12 @@ mongoose
     .connect(process.env.MONGO_URI)
     .then(() => {
         console.log('✅  MongoDB connected');
+        
+        // Synchronize statuses on boot
+        syncMemberStatuses();
+        // Periodically check every 24 hours
+        setInterval(syncMemberStatuses, 24 * 60 * 60 * 1000);
+
         app.listen(PORT, () => {
             console.log(`🚀  Server running on http://localhost:${PORT}`);
             console.log(`    Health:     GET  /health`);
@@ -83,6 +96,8 @@ mongoose
             console.log(`    Attendance: /api/attendance`);
             console.log(`    Dashboard:  /api/dashboard`);
             console.log(`    Uploads:    /uploads/<filename>`);
+            console.log(`    Expenses:   /api/expenses`);
+            console.log(`    Trainers:   /api/trainers`);
         });
     })
     .catch((err) => {

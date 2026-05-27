@@ -15,6 +15,16 @@ const memberSchema = new mongoose.Schema(
         },
         notes: { type: String, default: '' },
         photo: { type: String, default: null },   // uploaded filename e.g. "member_abc123.jpg"
+        trainerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Trainer', default: null },
+        address: { type: String, default: '' },
+        gender: { type: String, enum: ['male', 'female', 'other', ''], default: '' },
+        anniversaryDate: { type: Date, default: null },
+        trainerAssignedDate: { type: Date, default: null },
+        dob: { type: Date, default: null },
+        whatsappNotifications: { type: Boolean, default: true },
+        lastBirthdayWishSentYear: { type: Number, default: 0 },
+        lastAnniversaryWishSentYear: { type: Number, default: 0 },
+        lastExpiryReminderSentDate: { type: Date, default: null },
     },
     { timestamps: true }
 );

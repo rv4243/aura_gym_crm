@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Payment from '../models/Payment.js';
 import Member from '../models/Member.js';
 import Plan from '../models/Plan.js';
+import { sendTemplateMessage } from '../utils/whatsapp.js';
 
 const router = Router();
 
@@ -39,6 +40,22 @@ async function syncMemberFromPayment(payment) {
             memberUpdate.status     = 'active';
 
             console.log(`[Sync] ${member.name} → plan: ${plan.name}, starts: ${startDate.toDateString()}, expiry: ${newExpiry.toDateString()}`);
+
+            // Trigger WhatsApp payment success message if notifications enabled
+            if (member.whatsappNotifications) {
+                const amountStr = String(payment.amount);
+                const expiryStr = newExpiry.toLocaleDateString();
+                const template = process.env.META_RECEIPT_TEMPLATE_NAME || 'payment_receipt';
+                
+                sendTemplateMessage(member.phone, template, [
+                    member.name,
+                    amountStr,
+                    plan.name,
+                    expiryStr
+                ]).catch(err => {
+                    console.error('[WhatsApp Payment Notification Failed]:', err.message);
+                });
+            }
         } else {
             // Pending/overdue — switch plan but don't extend expiry yet
             console.log(`[Sync] ${member.name} → plan changed to: ${plan.name} (payment ${payment.status}, expiry unchanged)`);

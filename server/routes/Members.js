@@ -2,12 +2,14 @@ import { Router } from 'express';
 import Member from '../models/Member.js';
 import Plan from '../models/Plan.js';
 import Payment from '../models/Payment.js';
+import { syncMemberStatuses } from '../utils/statusSync.js';
 
 const router = Router();
 
 // GET /api/members — list all members (with optional search & status filter)
 router.get('/', async (req, res) => {
     try {
+        await syncMemberStatuses();
         const { search, status } = req.query;
         const query = {};
 
@@ -22,9 +24,20 @@ router.get('/', async (req, res) => {
 
         const members = await Member.find(query)
             .populate('planId', 'name durationDays price')
+            .populate('trainerId', 'name specialty photo')
             .sort({ createdAt: -1 });
 
-        res.json(members);
+        // Check which members have pending payments
+        const pendingPayments = await Payment.find({ status: 'pending' });
+        const pendingMemberIds = new Set(pendingPayments.map(p => p.memberId.toString()));
+
+        const membersWithPending = members.map(m => {
+            const memberObj = m.toObject();
+            memberObj.hasPending = pendingMemberIds.has(m._id.toString());
+            return memberObj;
+        });
+
+        res.json(membersWithPending);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -33,7 +46,10 @@ router.get('/', async (req, res) => {
 // GET /api/members/:id — single member
 router.get('/:id', async (req, res) => {
     try {
-        const member = await Member.findById(req.params.id).populate('planId');
+        await syncMemberStatuses();
+        const member = await Member.findById(req.params.id)
+            .populate('planId')
+            .populate('trainerId', 'name specialty photo');
         if (!member) return res.status(404).json({ error: 'Member not found' });
         res.json(member);
     } catch (err) {
@@ -44,7 +60,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/members — create member
 router.post('/', async (req, res) => {
     try {
-        const { name, phone, email, planId, joinDate, notes } = req.body;
+        const { name, phone, email, planId, trainerId, joinDate, notes, address, gender, anniversaryDate, trainerAssignedDate, dob, whatsappNotifications } = req.body;
 
         // Calculate expiry from plan duration
         let expiryDate = null;
@@ -59,9 +75,13 @@ router.post('/', async (req, res) => {
         }
 
         const member = await Member.create({
-            name, phone, email, planId, notes,
+            name, phone, email, planId, trainerId, notes, address, gender,
+            anniversaryDate: anniversaryDate || null,
+            trainerAssignedDate: trainerId ? (trainerAssignedDate || new Date()) : null,
             joinDate: joinDate || new Date(),
             expiryDate,
+            dob: dob || null,
+            whatsappNotifications: whatsappNotifications !== undefined ? whatsappNotifications : true,
         });
 
         // Auto-create a pending payment when a plan is assigned
@@ -85,7 +105,7 @@ router.post('/', async (req, res) => {
 // PUT /api/members/:id — update member
 router.put('/:id', async (req, res) => {
     try {
-        const { name, phone, email, planId, joinDate, status, notes } = req.body;
+        const { name, phone, email, planId, trainerId, joinDate, status, notes, address, gender, anniversaryDate, trainerAssignedDate, dob, whatsappNotifications } = req.body;
 
         // Recalculate expiry if plan changed
         let expiryDate = undefined;
@@ -98,9 +118,27 @@ router.put('/:id', async (req, res) => {
             }
         }
 
-        const update = { name, phone, email, planId, status, notes };
+        let finalTrainerAssignedDate = trainerAssignedDate;
+        if (trainerId !== undefined) {
+            const existing = await Member.findById(req.params.id).select('trainerId trainerAssignedDate');
+            if (existing) {
+                const oldTrainerId = existing.trainerId?.toString() || '';
+                const newTrainerId = trainerId?.toString() || '';
+                if (newTrainerId !== oldTrainerId) {
+                    finalTrainerAssignedDate = newTrainerId ? (trainerAssignedDate || new Date()) : null;
+                } else {
+                    finalTrainerAssignedDate = trainerAssignedDate !== undefined ? trainerAssignedDate : existing.trainerAssignedDate;
+                }
+            }
+        }
+
+        const update = { name, phone, email, planId, trainerId, status, notes, address, gender };
         if (joinDate) update.joinDate = joinDate;
         if (expiryDate) update.expiryDate = expiryDate;
+        if (anniversaryDate !== undefined) update.anniversaryDate = anniversaryDate || null;
+        if (finalTrainerAssignedDate !== undefined) update.trainerAssignedDate = finalTrainerAssignedDate;
+        if (dob !== undefined) update.dob = dob || null;
+        if (whatsappNotifications !== undefined) update.whatsappNotifications = whatsappNotifications;
 
         const member = await Member.findByIdAndUpdate(req.params.id, update, {
             new: true,

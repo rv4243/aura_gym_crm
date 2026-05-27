@@ -2,18 +2,21 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getMembers, createMember, updateMember, deleteMember } from '../api/members.js';
 import { getPlans } from '../api/plans.js';
+import { getTrainers } from '../api/trainers.js';
 import TopBar from '../components/TopBar.jsx';
 import Badge from '../components/Badge.jsx';
 import Modal from '../components/Modal.jsx';
 import Loader from '../components/Loader.jsx';
 
-const EMPTY = { name: '', phone: '', email: '', planId: '', joinDate: '', notes: '', status: 'active' };
+const EMPTY = { name: '', phone: '', email: '', planId: '', trainerId: '', joinDate: '', notes: '', status: 'active', address: '', gender: '', anniversaryDate: '', trainerAssignedDate: '', dob: '', whatsappNotifications: true };
 
 export default function Members() {
   const navigate = useNavigate();
   const [members, setMembers] = useState([]);
   const [plans,   setPlans]   = useState([]);
+  const [trainers, setTrainers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeMenuId, setActiveMenuId] = useState(null);
   const [search,  setSearch]  = useState('');
   const [status,  setStatus]  = useState('');
   const [modal,   setModal]   = useState(null); // null | 'add' | 'edit' | 'delete'
@@ -32,13 +35,21 @@ export default function Members() {
     Promise.all([
       getMembers({ search, status }),
       getPlans(),
-    ]).then(([mr, pr]) => {
+      getTrainers({ status: 'active' }),
+    ]).then(([mr, pr, tr]) => {
       setMembers(mr.data);
       setPlans(pr.data.filter((p) => p.isActive));
+      setTrainers(tr.data);
     }).catch(console.error).finally(() => setLoading(false));
   }, [search, status]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const handleOutsideClick = () => setActiveMenuId(null);
+    window.addEventListener('click', handleOutsideClick);
+    return () => window.removeEventListener('click', handleOutsideClick);
+  }, []);
 
   const openAdd  = () => { setForm(EMPTY); setModal('add'); };
   const openEdit = (m) => {
@@ -48,9 +59,16 @@ export default function Members() {
       phone:   m.phone,
       email:   m.email || '',
       planId:  m.planId?._id || '',
+      trainerId: m.trainerId?._id || '',
       joinDate: m.joinDate ? m.joinDate.split('T')[0] : '',
       notes:   m.notes || '',
       status:  m.status,
+      address: m.address || '',
+      gender:  m.gender || '',
+      anniversaryDate: m.anniversaryDate ? m.anniversaryDate.split('T')[0] : '',
+      trainerAssignedDate: m.trainerAssignedDate ? m.trainerAssignedDate.split('T')[0] : '',
+      dob: m.dob ? m.dob.split('T')[0] : '',
+      whatsappNotifications: m.whatsappNotifications !== undefined ? m.whatsappNotifications : true,
     });
     setModal('edit');
   };
@@ -88,6 +106,10 @@ export default function Members() {
     setSaving(false);
   };
 
+  const activeCount  = members.filter(m => m.status === 'active').length;
+  const pausedCount  = members.filter(m => m.status === 'paused').length;
+  const expiredCount = members.filter(m => m.status === 'expired').length;
+
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—';
   const isExpired = (d) => d && new Date(d) < new Date();
 
@@ -98,7 +120,19 @@ export default function Members() {
         <div className="page-header">
           <div className="page-header-info">
             <h1>Members</h1>
-            <p>{members.length} member{members.length !== 1 ? 's' : ''} found</p>
+            <p>
+              {members.length} member{members.length !== 1 ? 's' : ''} 
+              {members.length > 0 && (
+                <>
+                  <span style={{ color: 'var(--text-muted)', margin: '0 8px' }}>·</span>
+                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>{activeCount} active</span>
+                  <span style={{ color: 'var(--text-muted)', margin: '0 8px' }}>·</span>
+                  <span style={{ color: 'var(--warning)', fontWeight: 600 }}>{pausedCount} paused</span>
+                  <span style={{ color: 'var(--text-muted)', margin: '0 8px' }}>·</span>
+                  <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{expiredCount} expired</span>
+                </>
+              )}
+            </p>
           </div>
           <button className="btn btn-primary" onClick={openAdd}>+ Add Member</button>
         </div>
@@ -170,7 +204,12 @@ export default function Members() {
                             }
                           </div>
                           <div>
-                            <div style={{ fontWeight: 500 }}>{m.name}</div>
+                            <div
+                              onClick={() => navigate(`/members/${m._id}`)}
+                              style={{ fontWeight: 600, color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline' }}
+                            >
+                              {m.name}
+                            </div>
                             {m.email && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{m.email}</div>}
                           </div>
                         </div>
@@ -184,19 +223,140 @@ export default function Members() {
                         </span>
                       </td>
                       <td><Badge status={m.status} /></td>
-                      <td>
-                        <div className="table-actions">
-                          <button className="btn-icon" title="View Profile" onClick={() => navigate(`/members/${m._id}`)}
-                            style={{ color: 'var(--accent)' }}>
-                            👁️
-                          </button>
-                          <button className="btn-icon" title="Edit" onClick={() => openEdit(m)}>
-                            ✏️
-                          </button>
-                          <button className="btn-icon" title="Delete" onClick={() => openDelete(m)} style={{ color: 'var(--danger)' }}>
-                            🗑️
-                          </button>
-                        </div>
+                      <td style={{ position: 'relative' }}>
+                        <button
+                          className="btn-icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuId(activeMenuId === m._id ? null : m._id);
+                          }}
+                          style={{
+                            fontSize: 18,
+                            cursor: 'pointer',
+                            padding: '4px 8px',
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                          }}
+                          title="Actions"
+                        >
+                          ⋮
+                        </button>
+                        {activeMenuId === m._id && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              right: 10,
+                              top: '75%',
+                              zIndex: 1000,
+                              background: '#12121a',
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
+                              minWidth: 160,
+                              padding: '6px 0',
+                              textAlign: 'left',
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div
+                              className="dropdown-item"
+                              onClick={() => { setActiveMenuId(null); navigate(`/members/${m._id}`); }}
+                              style={{
+                                padding: '8px 14px',
+                                cursor: 'pointer',
+                                fontSize: 12.5,
+                                display: 'flex',
+                                gap: 8,
+                                alignItems: 'center',
+                                color: 'var(--text-primary)',
+                                transition: 'background 0.2s',
+                              }}
+                              onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                              onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                            >
+                              👁️ View Profile
+                            </div>
+                            <div
+                              className="dropdown-item"
+                              onClick={() => { setActiveMenuId(null); openEdit(m); }}
+                              style={{
+                                padding: '8px 14px',
+                                cursor: 'pointer',
+                                fontSize: 12.5,
+                                display: 'flex',
+                                gap: 8,
+                                alignItems: 'center',
+                                color: 'var(--text-primary)',
+                                transition: 'background 0.2s',
+                              }}
+                              onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                              onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                            >
+                              ✏️ Edit Details
+                            </div>
+                            <div
+                              className="dropdown-item"
+                              onClick={() => { setActiveMenuId(null); navigate(`/members/${m._id}?renew=true`); }}
+                              style={{
+                                padding: '8px 14px',
+                                cursor: 'pointer',
+                                fontSize: 12.5,
+                                display: 'flex',
+                                gap: 8,
+                                alignItems: 'center',
+                                color: 'var(--text-primary)',
+                                transition: 'background 0.2s',
+                              }}
+                              onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                              onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                            >
+                              🔄 Renew Plan
+                            </div>
+                            {m.hasPending && (
+                              <div
+                                className="dropdown-item highlight-due"
+                                onClick={() => { setActiveMenuId(null); navigate(`/payments?memberId=${m._id}`); }}
+                                style={{
+                                  padding: '8px 14px',
+                                  cursor: 'pointer',
+                                  fontSize: 12.5,
+                                  display: 'flex',
+                                  gap: 8,
+                                  alignItems: 'center',
+                                  color: '#e05252',
+                                  fontWeight: 600,
+                                  background: 'rgba(224,82,82,0.12)',
+                                  transition: 'background 0.2s',
+                                }}
+                                onMouseEnter={(e) => e.target.style.background = 'rgba(224,82,82,0.18)'}
+                                onMouseLeave={(e) => e.target.style.background = 'rgba(224,82,82,0.12)'}
+                              >
+                                💰 Pay Due Balance
+                              </div>
+                            )}
+                            <div
+                              className="dropdown-item text-danger"
+                              onClick={() => { setActiveMenuId(null); openDelete(m); }}
+                              style={{
+                                padding: '8px 14px',
+                                cursor: 'pointer',
+                                fontSize: 12.5,
+                                display: 'flex',
+                                gap: 8,
+                                alignItems: 'center',
+                                color: '#e05252',
+                                borderTop: '1px solid var(--border)',
+                                marginTop: 4,
+                                transition: 'background 0.2s',
+                              }}
+                              onMouseEnter={(e) => e.target.style.background = 'rgba(224,82,82,0.1)'}
+                              onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                            >
+                              🗑️ Delete Member
+                            </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -236,6 +396,33 @@ export default function Members() {
             </div>
             <div className="form-row">
               <div className="form-group">
+                <label className="form-label">Gender</label>
+                <select className="form-select" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Date of Birth</label>
+                <input className="form-input" type="date" value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Anniversary Date</label>
+                <input className="form-input" type="date" value={form.anniversaryDate} onChange={(e) => setForm({ ...form, anniversaryDate: e.target.value })} />
+              </div>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', marginTop: 24 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
+                  <input type="checkbox" checked={form.whatsappNotifications} onChange={(e) => setForm({ ...form, whatsappNotifications: e.target.checked })} style={{ cursor: 'pointer' }} />
+                  <span>WhatsApp Notifications</span>
+                </label>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
                 <label className="form-label">Membership Plan</label>
                 <select className="form-select" value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })}>
                   <option value="">No plan</option>
@@ -246,6 +433,25 @@ export default function Members() {
                 <label className="form-label">Join Date</label>
                 <input className="form-input" type="date" value={form.joinDate} onChange={(e) => setForm({ ...form, joinDate: e.target.value })} />
               </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Assigned Trainer</label>
+                <select className="form-select" value={form.trainerId} onChange={(e) => setForm({ ...form, trainerId: e.target.value })}>
+                  <option value="">No Trainer</option>
+                  {trainers.map((t) => <option key={t._id} value={t._id}>{t.name} ({t.specialty || 'General'})</option>)}
+                </select>
+              </div>
+              {form.trainerId && (
+                <div className="form-group">
+                  <label className="form-label">Trainer Assigned Date</label>
+                  <input className="form-input" type="date" value={form.trainerAssignedDate} onChange={(e) => setForm({ ...form, trainerAssignedDate: e.target.value })} />
+                </div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Address</label>
+              <input className="form-input" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="123 Gym Street, Area" />
             </div>
             {modal === 'edit' && (
               <div className="form-group">

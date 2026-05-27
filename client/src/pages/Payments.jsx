@@ -114,6 +114,12 @@ export default function Payments() {
     const params = {};
     if (filters.status) params.status = filters.status;
     if (filters.month && filters.year) { params.month = filters.month; params.year = filters.year; }
+    
+    // Support filtering by memberId from URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const memberId = urlParams.get('memberId');
+    if (memberId) params.memberId = memberId;
+
     Promise.all([getPayments(params), getMembers({}), getPlans()])
       .then(([pr, mr, plr]) => {
         setPayments(pr.data);
@@ -258,7 +264,7 @@ export default function Payments() {
                     <th>Status</th>
                     <th>Date</th>
                     <th>Notes</th>
-                    <th>Actions</th>
+                    {/* <th>Actions</th> */}
                   </tr>
                 </thead>
                 <tbody>
@@ -279,8 +285,7 @@ export default function Payments() {
                       <td className="muted" style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {p.notes || '—'}
                       </td>
-                      <td>
-                        {/* ── Renew Button ── */}
+                      {/* <td>
                         <button
                           className="btn btn-ghost btn-sm"
                           title="Renew membership for this member"
@@ -294,7 +299,7 @@ export default function Payments() {
                         >
                           🔄 Renew
                         </button>
-                      </td>
+                      </td> */}
                     </tr>
                   ))}
                 </tbody>

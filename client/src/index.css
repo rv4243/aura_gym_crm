@@ -703,3 +703,10 @@ tbody td.muted { color: var(--text-muted); font-size: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(200,169,110,0.3); }
+
+/* ── Responsive Stack Helper ── */
+@media (max-width: 768px) {
+  .responsive-stack {
+    grid-template-columns: 1fr !important;
+  }
+}

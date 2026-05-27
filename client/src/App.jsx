@@ -12,6 +12,9 @@ import MemberProfile from './pages/MemberProfile.jsx';
 import Plans         from './pages/Plans.jsx';
 import Payments      from './pages/Payments.jsx';
 import Attendance    from './pages/Attendance.jsx';
+import Expenses      from './pages/Expenses.jsx';
+import Trainers      from './pages/Trainers.jsx';
+import TrainerProfile from './pages/TrainerProfile.jsx';
 
 // Injects Clerk's getToken into the Axios interceptor once auth is ready
 function TokenBridge() {
@@ -60,7 +63,10 @@ export default function App() {
               <Route path="/members/:id"     element={<MemberProfile />} />
               <Route path="/plans"           element={<Plans />} />
               <Route path="/payments"        element={<Payments />} />
-              <Route path="/attendance"      element={<Attendance />} />
+               <Route path="/attendance"      element={<Attendance />} />
+              <Route path="/expenses"        element={<Expenses />} />
+              <Route path="/trainers"        element={<Trainers />} />
+              <Route path="/trainers/:id"    element={<TrainerProfile />} />
             </Routes>
           </main>
         </div>

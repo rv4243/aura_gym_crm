@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getMember, updateMember } from '../api/members.js';
-import { getPayments } from '../api/payments.js';
+import { getPayments, createPayment } from '../api/payments.js';
 import { getAttendance } from '../api/attendance.js';
 import { getPlans } from '../api/plans.js';
+import { getTrainers } from '../api/trainers.js';
 import { uploadMemberPhoto, deleteMemberPhoto } from '../api/memberPhoto.js';
 import TopBar from '../components/TopBar.jsx';
 import Badge from '../components/Badge.jsx';
@@ -20,6 +21,21 @@ function fmtDate(d) {
 function daysLeft(expiry) {
   if (!expiry) return null;
   return Math.ceil((new Date(expiry) - new Date()) / (1000 * 60 * 60 * 24));
+}
+function getDurationString(sinceDate) {
+  if (!sinceDate) return '';
+  const diffTime = Math.abs(new Date() - new Date(sinceDate));
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays < 30) {
+    return `${diffDays} day${diffDays !== 1 ? 's' : ''}`;
+  }
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) {
+    return `${diffMonths} month${diffMonths !== 1 ? 's' : ''}`;
+  }
+  const diffYears = Math.floor(diffMonths / 12);
+  const remainingMonths = diffMonths % 12;
+  return `${diffYears} yr${diffYears !== 1 ? 's' : ''} ${remainingMonths > 0 ? `${remainingMonths} mo` : ''}`;
 }
 
 export default function MemberProfile() {
@@ -38,6 +54,11 @@ export default function MemberProfile() {
   const [saving,     setSaving]     = useState(false);
   const [toast,      setToast]      = useState(null);
   const [avatarHover, setAvatarHover] = useState(false);
+  const [trainers,   setTrainers]   = useState([]);
+  const [renewModal, setRenewModal] = useState(false);
+  const [renewForm,  setRenewForm]  = useState({ planId: '', amount: '', method: 'cash', status: 'paid', notes: '' });
+  const [renewSaving, setRenewSaving] = useState(false);
+  const [planChanged, setPlanChanged] = useState(false);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -51,20 +72,45 @@ export default function MemberProfile() {
       getPayments({ memberId: id }),
       getAttendance({ memberId: id }),
       getPlans(),
-    ]).then(([mr, pr, ar, plr]) => {
+      getTrainers({ status: 'active' }),
+    ]).then(([mr, pr, ar, plr, tr]) => {
       setMember(mr.data);
       setPayments(pr.data);
       setAttendance(ar.data);
       setPlans(plr.data.filter(p => p.isActive));
+      setTrainers(tr.data);
       setForm({
         name:     mr.data.name,
         phone:    mr.data.phone,
         email:    mr.data.email || '',
         planId:   mr.data.planId?._id || '',
+        trainerId: mr.data.trainerId?._id || '',
         joinDate: mr.data.joinDate ? mr.data.joinDate.split('T')[0] : '',
         status:   mr.data.status,
         notes:    mr.data.notes || '',
+        address:  mr.data.address || '',
+        gender:   mr.data.gender || '',
+        anniversaryDate: mr.data.anniversaryDate ? mr.data.anniversaryDate.split('T')[0] : '',
+        trainerAssignedDate: mr.data.trainerAssignedDate ? mr.data.trainerAssignedDate.split('T')[0] : '',
+        dob: mr.data.dob ? mr.data.dob.split('T')[0] : '',
+        whatsappNotifications: mr.data.whatsappNotifications !== undefined ? mr.data.whatsappNotifications : true,
       });
+
+      // Check if renew=true URL param is present
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('renew') === 'true') {
+        const currentPlanId = mr.data.planId?._id || '';
+        const currentPlan = plr.data.find(p => p._id === currentPlanId);
+        setRenewForm({
+          planId: currentPlanId,
+          amount: currentPlan ? currentPlan.price : '',
+          method: 'cash',
+          status: 'paid',
+          notes: '',
+        });
+        setPlanChanged(false);
+        setRenewModal(true);
+      }
     }).catch(console.error).finally(() => setLoading(false));
   };
 
@@ -112,6 +158,57 @@ export default function MemberProfile() {
     setSaving(false);
   };
 
+  // ── Renewal ────────────────────────────────────────────────────────────────
+  const openRenewModal = () => {
+    const currentPlanId = member.planId?._id || '';
+    const currentPlan = plans.find(p => p._id === currentPlanId);
+    setRenewForm({
+      planId: currentPlanId,
+      amount: currentPlan ? currentPlan.price : '',
+      method: 'cash',
+      status: 'paid',
+      notes: '',
+    });
+    setPlanChanged(false);
+    setRenewModal(true);
+  };
+
+  const handleRenewPlanChange = (planId) => {
+    const originalPlanId = member.planId?._id || '';
+    const plan = plans.find(p => p._id === planId);
+    setPlanChanged(planId !== originalPlanId);
+    setRenewForm(f => ({ ...f, planId, amount: plan ? plan.price : '' }));
+  };
+
+  const handleRenewSave = async () => {
+    setRenewSaving(true);
+    try {
+      const autoNote = planChanged ? 'Plan upgraded/changed during renewal' : 'Membership renewed';
+      const notes = renewForm.notes ? `${autoNote} — ${renewForm.notes}` : autoNote;
+      await createPayment({
+        memberId: member._id,
+        planId: renewForm.planId,
+        amount: Number(renewForm.amount),
+        method: renewForm.method,
+        status: renewForm.status,
+        notes,
+      });
+      showToast('Membership renewed successfully 🎉');
+      setRenewModal(false);
+      loadAll();
+    } catch (e) {
+      showToast(e.response?.data?.error || 'Renewal failed', 'error');
+    }
+    setRenewSaving(false);
+  };
+
+  const renewSelectedPlan = plans.find(p => p._id === renewForm.planId);
+  const renewCurrentExpiry = member?.expiryDate ? new Date(member.expiryDate) : null;
+  const renewBase = renewCurrentExpiry && renewCurrentExpiry > new Date() ? renewCurrentExpiry : new Date();
+  const renewNewExpiry = renewSelectedPlan
+    ? (() => { const d = new Date(renewBase); d.setDate(d.getDate() + renewSelectedPlan.durationDays); return d; })()
+    : null;
+
   if (loading) return <><TopBar title="Member Profile" /><Loader /></>;
   if (!member)  return <><TopBar title="Not Found" /><div className="page-body"><p>Member not found.</p></div></>;
 
@@ -123,6 +220,7 @@ export default function MemberProfile() {
   }).length;
   const totalPaid   = payments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0);
   const photoUrl    = member.photo ? `/uploads/${member.photo}` : null;
+  const hasPending  = payments.some(p => p.status === 'pending');
 
   const expiryColor = days === null ? '#6a6880'
     : days <= 7  ? '#e05252'
@@ -247,7 +345,39 @@ export default function MemberProfile() {
                 <span>📞 {member.phone}</span>
                 {member.email && <span>✉️ {member.email}</span>}
                 <span>📅 Joined {fmtDate(member.joinDate)}</span>
+                {member.gender && <span>👤 {member.gender.charAt(0).toUpperCase() + member.gender.slice(1)}</span>}
+                {member.dob && <span>🎂 Birthday: {fmtDate(member.dob)}</span>}
+                {member.anniversaryDate && <span>💍 Anniversary: {fmtDate(member.anniversaryDate)}</span>}
+                <span>💬 WhatsApp: {member.whatsappNotifications ? '✅ Enabled' : '❌ Disabled'}</span>
               </div>
+              {member.address && (
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 6 }}>
+                  📍 {member.address}
+                </div>
+              )}
+              {member.trainerId ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10, fontSize: 13 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>🏋️ Assigned Trainer:</span>
+                    <span
+                      style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, textDecoration: 'underline' }}
+                      onClick={() => navigate(`/trainers/${member.trainerId._id}`)}
+                    >
+                      {member.trainerId.name}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({member.trainerId.specialty || 'General'})</span>
+                  </div>
+                  {member.trainerAssignedDate && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 22 }}>
+                      ⏱️ Training since {fmtDate(member.trainerAssignedDate)} ({getDurationString(member.trainerAssignedDate)} ago)
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>
+                  🏋️ No trainer assigned
+                </div>
+              )}
               {member.notes && (
                 <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--text-secondary)',
                   background: 'var(--bg-elevated)', padding: '8px 12px',
@@ -255,12 +385,28 @@ export default function MemberProfile() {
                   💬 {member.notes}
                 </div>
               )}
-              <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 10 }}>
+              {/* <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 10 }}>
                 📷 Click the avatar to upload a profile photo (JPG, PNG or WebP · max 5 MB)
-              </p>
+              </p> */}
             </div>
 
-            <button className="btn btn-secondary" onClick={() => setEditModal(true)}>✏️ Edit Profile</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignSelf: 'flex-start' }}>
+              <button
+                className="btn btn-primary"
+                onClick={openRenewModal}
+                disabled={hasPending}
+                style={{ opacity: hasPending ? 0.6 : 1 }}
+                title={hasPending ? 'Cannot renew/upgrade with pending payments' : 'Renew membership'}
+              >
+                🔄 Renew / Upgrade Plan
+              </button>
+              <button className="btn btn-secondary" onClick={() => setEditModal(true)}>✏️ Edit Profile</button>
+              {hasPending && (
+                <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 2, maxWidth: 180, fontStyle: 'italic' }}>
+                  ⚠️ Clear pending payments to renew/upgrade.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -384,9 +530,36 @@ export default function MemberProfile() {
                 <input className="form-input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
               </div>
             </div>
-            <div className="form-group">
+             <div className="form-group">
               <label className="form-label">Email</label>
               <input className="form-input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Gender</label>
+                <select className="form-select" value={form.gender} onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}>
+                  <option value="">Select Gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Date of Birth</label>
+                <input className="form-input" type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Anniversary Date</label>
+                <input className="form-input" type="date" value={form.anniversaryDate} onChange={e => setForm(f => ({ ...f, anniversaryDate: e.target.value }))} />
+              </div>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', marginTop: 24 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
+                  <input type="checkbox" checked={form.whatsappNotifications} onChange={e => setForm(f => ({ ...f, whatsappNotifications: e.target.checked }))} style={{ cursor: 'pointer' }} />
+                  <span>WhatsApp Notifications</span>
+                </label>
+              </div>
             </div>
             <div className="form-row">
               <div className="form-group">
@@ -405,9 +578,96 @@ export default function MemberProfile() {
                 </select>
               </div>
             </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Assigned Trainer</label>
+                <select className="form-select" value={form.trainerId} onChange={e => setForm(f => ({ ...f, trainerId: e.target.value }))}>
+                  <option value="">No Trainer</option>
+                  {trainers.map(t => <option key={t._id} value={t._id}>{t.name} ({t.specialty || 'General'})</option>)}
+                </select>
+              </div>
+              {form.trainerId && (
+                <div className="form-group">
+                  <label className="form-label">Trainer Assigned Date</label>
+                  <input className="form-input" type="date" value={form.trainerAssignedDate} onChange={e => setForm(f => ({ ...f, trainerAssignedDate: e.target.value }))} />
+                </div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Address</label>
+              <input className="form-input" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="123 Gym Street, Area" />
+            </div>
             <div className="form-group">
               <label className="form-label">Notes</label>
               <input className="form-input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional…" />
+            </div>
+          </Modal>
+        )}
+
+        {/* ── Renewal Modal ── */}
+        {renewModal && (
+          <Modal
+            title="🔄 Renew Membership / Change Plan"
+            onClose={() => setRenewModal(false)}
+            footer={
+              <>
+                <button className="btn btn-ghost" onClick={() => setRenewModal(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={handleRenewSave} disabled={renewSaving || !renewForm.planId}>
+                  {renewSaving ? 'Processing…' : planChanged ? 'Upgrade & Pay' : 'Pay & Renew'}
+                </button>
+              </>
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="form-group">
+                <label className="form-label">Select Plan</label>
+                <select className="form-select" value={renewForm.planId} onChange={e => handleRenewPlanChange(e.target.value)}>
+                  <option value="">Choose plan…</option>
+                  {plans.map(p => <option key={p._id} value={p._id}>{p.name} ({p.durationDays} days) — ₹{p.price}</option>)}
+                </select>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Amount (₹)</label>
+                  <input className="form-input" type="number" value={renewForm.amount} onChange={e => setRenewForm(f => ({ ...f, amount: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Payment Method</label>
+                  <select className="form-select" value={renewForm.method} onChange={e => setRenewForm(f => ({ ...f, method: e.target.value }))}>
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI / QR Code</option>
+                    <option value="card">Card</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Notes</label>
+                <input className="form-input" value={renewForm.notes} onChange={e => setRenewForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional renewal notes…" />
+              </div>
+
+              {renewSelectedPlan && (
+                <div style={{
+                  padding: 12, borderRadius: 8, background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-subtle)', fontSize: 12.5,
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Current Expiry:</span>
+                    <span>{fmtDate(member.expiryDate)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>New Start Date:</span>
+                    <span>{fmtDate(renewBase)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, color: 'var(--success)' }}>
+                    <span>New Expiry Preview:</span>
+                    <span>{fmtDate(renewNewExpiry)}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </Modal>
         )}
