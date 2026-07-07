@@ -348,7 +348,7 @@ export default function MemberProfile() {
                 {member.gender && <span>👤 {member.gender.charAt(0).toUpperCase() + member.gender.slice(1)}</span>}
                 {member.dob && <span>🎂 Birthday: {fmtDate(member.dob)}</span>}
                 {member.anniversaryDate && <span>💍 Anniversary: {fmtDate(member.anniversaryDate)}</span>}
-                {/* <span>💬 WhatsApp: {member.whatsappNotifications ? '✅ Enabled' : '❌ Disabled'}</span> */}
+                {/* <span>💬 WhatsApp:{member.whatsappNotifications ? '✅ Enabled' : '❌ Disabled'}</span> */}
               </div>
               {member.address && (
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 6 }}>
