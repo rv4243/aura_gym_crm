@@ -30,9 +30,16 @@ async function syncMemberFromPayment(payment) {
         };
 
         if (payment.status === 'paid') {
-            // Start expiry from the payment date (today), not from old expiry.
-            // This ensures: pay today for 10-day plan → expires in 10 days.
-            const startDate = payment.paidDate ? new Date(payment.paidDate) : new Date();
+            const now = new Date();
+            const currentExpiry = member.expiryDate ? new Date(member.expiryDate) : null;
+            
+            // Dynamic renewal start date calculation:
+            // - If renewing early (currentExpiry is in the future), start from currentExpiry (extending it).
+            // - If renewing late / gap, start from the payment date (today).
+            const startDate = (currentExpiry && currentExpiry > now) 
+                ? currentExpiry 
+                : (payment.paidDate ? new Date(payment.paidDate) : now);
+
             const newExpiry = new Date(startDate);
             newExpiry.setDate(newExpiry.getDate() + plan.durationDays);
 

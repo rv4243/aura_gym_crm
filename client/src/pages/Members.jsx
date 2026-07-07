@@ -371,6 +371,7 @@ export default function Members() {
           <Modal
             title={modal === 'add' ? 'Add New Member' : 'Edit Member'}
             onClose={closeModal}
+            size="modal-lg"
             footer={
               <>
                 <button className="btn btn-ghost" onClick={closeModal}>Cancel</button>

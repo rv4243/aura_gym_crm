@@ -454,6 +454,9 @@ tbody td.muted { color: var(--text-muted); font-size: 12px; }
   overflow-y: auto;
   animation: slideUp 0.2s cubic-bezier(0.4,0,0.2,1);
 }
+.modal-lg {
+  max-width: 720px;
+}
 .modal-header {
   display: flex;
   align-items: center;
